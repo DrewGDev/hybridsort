@@ -1,6 +1,7 @@
 """Interface Streamlit para explorar a lista e as estratégias de busca."""
 
 from pathlib import Path
+import math
 import sys
 import time
 
@@ -378,6 +379,107 @@ st.markdown(
         line-height: 1.55;
     }
 
+    .visualization-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr);
+        gap: 0.9rem;
+        margin: 0.8rem 0 1rem;
+    }
+
+    .visualization-card {
+        min-width: 0;
+        padding: 1rem 1.1rem;
+        border: 1px solid #e7e4f0;
+        border-radius: 16px;
+        background: linear-gradient(145deg, #fff 0%, #f9f8ff 100%);
+        box-shadow: 0 8px 22px rgba(43, 36, 82, 0.045);
+        animation: trace-arrive 320ms ease-out both;
+    }
+
+    .visualization-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+        margin-bottom: 0.2rem;
+        color: #302852;
+        font-size: 0.94rem;
+        font-weight: 750;
+    }
+
+    .visualization-caption {
+        margin: 0 0 0.65rem;
+        color: #77738b;
+        font-size: 0.76rem;
+        line-height: 1.45;
+    }
+
+    .candidate-chart { display: block; width: 100%; height: auto; overflow: visible; }
+    .candidate-gridline { stroke: #e8e6f1; stroke-width: 1; }
+    .candidate-axis-label, .candidate-step-label {
+        fill: #77738b;
+        font-family: "Aptos", "Segoe UI", sans-serif;
+        font-size: 11px;
+    }
+    .candidate-line {
+        fill: none;
+        stroke: #6758e8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 3.5;
+    }
+    .candidate-dot { fill: #fff; stroke: #6758e8; stroke-width: 3; }
+    .candidate-dot.current { fill: #6758e8; animation: chart-dot-pop var(--chart-duration, 0.45s) ease-out both; }
+    .candidate-value {
+        fill: #5142cf;
+        font-family: "Aptos", "Segoe UI", sans-serif;
+        font-size: 10px;
+        font-weight: 750;
+        text-anchor: middle;
+    }
+    .candidate-line-draw {
+        animation: chart-line-draw var(--chart-duration, 0.45s) ease-out both;
+    }
+
+    .strategy-chart { display: grid; gap: 1.1rem; margin-top: 1.1rem; }
+    .strategy-row { display: grid; gap: 0.38rem; }
+    .strategy-row-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        color: #514d62;
+        font-size: 0.78rem;
+        font-weight: 700;
+    }
+    .strategy-track {
+        height: 0.8rem;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #eeecf5;
+    }
+    .strategy-fill {
+        height: 100%;
+        min-width: 0;
+        border-radius: inherit;
+        transform: scaleX(0);
+        transform-origin: left center;
+        animation: chart-bar-grow var(--chart-duration, 0.45s) cubic-bezier(.2,.75,.25,1) forwards;
+    }
+    .strategy-fill.binary { background: linear-gradient(90deg, #a79cff, #6758e8); }
+    .strategy-fill.sequential { background: linear-gradient(90deg, #ffc76c, #e89a31); }
+    .strategy-chart-note {
+        margin-top: 1rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #eceaf3;
+        color: #77738b;
+        font-size: 0.72rem;
+        line-height: 1.45;
+    }
+
+    @keyframes chart-line-draw { to { stroke-dashoffset: 0; } }
+    @keyframes chart-dot-pop { from { opacity: 0.35; transform: scale(0.65); } to { opacity: 1; transform: scale(1); } }
+    @keyframes chart-bar-grow { to { transform: scaleX(1); } }
+
     .tail-track {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
@@ -465,12 +567,195 @@ st.markdown(
         [data-testid="stForm"] { padding: 1rem; }
         .trace-stats { grid-template-columns: 1fr; }
         .transition-grid { grid-template-columns: 1fr; }
+        .visualization-grid { grid-template-columns: 1fr; }
         .transition-arrow { justify-self: center; transform: rotate(90deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            scroll-behavior: auto !important;
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def format_number_pt(number: int) -> str:
+    """Formata quantidades com ponto como separador de milhar em português."""
+    return f"{number:,}".replace(",", ".")
+
+
+def render_presentation_charts(
+    passos: list[dict[str, int | str]],
+    current_step: int,
+    list_size: int,
+    animation_seconds: float,
+) -> None:
+    """Mostra gráficos do intervalo restante e das comparações até esta etapa."""
+    passos_visiveis = passos[:current_step]
+    passos_binarios = [passo for passo in passos_visiveis if passo["fase"] == "binaria"]
+    iteracoes_binarias = len(passos_binarios)
+    iteracoes_sequenciais = len(passos_visiveis) - iteracoes_binarias
+    escala_iteracoes = max(iteracoes_binarias, iteracoes_sequenciais, 1)
+    largura_binaria = iteracoes_binarias / escala_iteracoes * 100
+    largura_sequencial = iteracoes_sequenciais / escala_iteracoes * 100
+    duracao_animacao = max(0.06, min(animation_seconds * 0.8, 0.65))
+
+    if passos_binarios:
+        # O gráfico parte do tamanho total e mostra o que sobra depois de cada comparação.
+        contagens = [list_size]
+        for passo in passos_binarios:
+            if passo["decisao"] == "encontrada":
+                contagens.append(1)
+            else:
+                candidatos_depois = (
+                    int(passo["novo_fim"]) - int(passo["novo_inicio"]) + 1
+                )
+                contagens.append(max(0, candidatos_depois))
+        maximo = max(list_size, max(contagens), 1)
+        largura_svg = 680
+        altura_svg = 210
+        margem_esquerda = 48
+        margem_direita = 18
+        margem_superior = 24
+        margem_inferior = 38
+        area_largura = largura_svg - margem_esquerda - margem_direita
+        area_altura = altura_svg - margem_superior - margem_inferior
+        espacamento = area_largura / max(len(contagens) - 1, 1)
+        coordenadas = []
+        for indice, contagem in enumerate(contagens):
+            x = (
+                margem_esquerda + area_largura / 2
+                if len(contagens) == 1
+                else margem_esquerda + indice * espacamento
+            )
+            y = margem_superior + (1 - contagem / maximo) * area_altura
+            coordenadas.append((x, y, contagem))
+
+        caminho = " ".join(
+            f"{'M' if indice == 0 else 'L'} {x:.1f} {y:.1f}"
+            for indice, (x, y, _) in enumerate(coordenadas)
+        )
+        comprimento = sum(
+            math.hypot(x2 - x1, y2 - y1)
+            for (x1, y1, _), (x2, y2, _) in zip(coordenadas, coordenadas[1:])
+        )
+        comprimento = max(comprimento, 1)
+        marcas_y = [maximo, maximo // 2, 0]
+        linhas_grade = []
+        for marca in marcas_y:
+            y = margem_superior + (1 - marca / maximo) * area_altura
+            linhas_grade.append(
+                f'<line class="candidate-gridline" x1="{margem_esquerda}" y1="{y:.1f}" '
+                f'x2="{largura_svg - margem_direita}" y2="{y:.1f}" />'
+                f'<text class="candidate-axis-label" x="{margem_esquerda - 8}" '
+                f'y="{y + 4:.1f}" text-anchor="end">{format_number_pt(marca)}</text>'
+            )
+
+        pontos_svg = []
+        total_pontos = len(coordenadas)
+        for indice, (x, y, contagem) in enumerate(coordenadas):
+            classe_atual = " current" if indice == total_pontos - 1 else ""
+            deslocamento_rotulo = -12 if indice % 2 == 0 else 17
+            tooltip = (
+                f"Início: {format_number_pt(contagem)} candidatos"
+                if indice == 0
+                else f"Após a etapa {indice}: {format_number_pt(contagem)} candidatos"
+            )
+            pontos_svg.append(
+                f'<circle class="candidate-dot{classe_atual}" cx="{x:.1f}" cy="{y:.1f}" r="5">'
+                f'<title>{tooltip}</title></circle>'
+                f'<text class="candidate-value" x="{x:.1f}" '
+                f'y="{y + deslocamento_rotulo:.1f}">{format_number_pt(contagem)}</text>'
+            )
+
+        indices_eixo = sorted({0, total_pontos // 2, total_pontos - 1})
+        rotulos_eixo = []
+        for indice in indices_eixo:
+            rotulo = "Início" if indice == 0 else f"Etapa {indice}"
+            rotulos_eixo.append(
+                f'<text class="candidate-step-label" x="{coordenadas[indice][0]:.1f}" '
+                f'y="{altura_svg - 8}" text-anchor="middle">{rotulo}</text>'
+            )
+        rotulos_eixo = "".join(rotulos_eixo)
+        grafico_candidatos = (
+            f'<svg class="candidate-chart" viewBox="0 0 {largura_svg} {altura_svg}" '
+            f'role="img" aria-label="Candidatos restantes em cada comparação binária">'
+            f'{"".join(linhas_grade)}'
+            f'<path class="candidate-line candidate-line-draw" d="{caminho}" '
+            f'style="stroke-dasharray:{comprimento:.1f};stroke-dashoffset:{comprimento:.1f}" />'
+            f'{"".join(pontos_svg)}{rotulos_eixo}</svg>'
+        )
+        legenda_candidatos = (
+            "Começamos com toda a região; cada ponto mostra quantos candidatos "
+            "restam depois de uma comparação."
+        )
+    else:
+        grafico_candidatos = (
+            '<div class="strategy-chart-note">A busca binária ainda não tem comparações registradas.</div>'
+        )
+        legenda_candidatos = "Os candidatos aparecerão aqui quando a etapa binária começar."
+
+    st.markdown(
+        f"""
+        <div class="visualization-grid" style="--chart-duration:{duracao_animacao:.2f}s">
+            <section class="visualization-card">
+                <div class="visualization-heading"><span>📉 Candidatos restantes</span><span>{len(passos_binarios)} etapas</span></div>
+                <p class="visualization-caption">A busca binária estreita a faixa a cada comparação.</p>
+                {grafico_candidatos}
+                <p class="visualization-caption">{legenda_candidatos}</p>
+            </section>
+            <section class="visualization-card">
+                <div class="visualization-heading"><span>⚡ Comparações</span><span>até agora</span></div>
+                <p class="visualization-caption">As barras mostram quantos itens cada método examinou nesta busca.</p>
+                <div class="strategy-chart">
+                    <div class="strategy-row">
+                        <div class="strategy-row-label"><span>Busca binária</span><strong>{iteracoes_binarias}</strong></div>
+                        <div class="strategy-track"><div class="strategy-fill binary" style="width:{largura_binaria:.2f}%"></div></div>
+                    </div>
+                    <div class="strategy-row">
+                        <div class="strategy-row-label"><span>Busca sequencial</span><strong>{iteracoes_sequenciais}</strong></div>
+                        <div class="strategy-track"><div class="strategy-fill sequential" style="width:{largura_sequencial:.2f}%"></div></div>
+                    </div>
+                </div>
+                <div class="strategy-chart-note">Uma comparação conta um valor examinado. A cauda só é percorrida se a chave não estiver na região ordenada.</div>
+            </section>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_search_presentation_frame(
+    step: dict[str, int | str],
+    current_step: int,
+    total_steps: int,
+    key: int,
+    ordered_region: list[int],
+    tail: list[int],
+    passos: list[dict[str, int | str]],
+    animation_seconds: float,
+) -> None:
+    """Atualiza os gráficos e a explicação da comparação que está em foco."""
+    render_presentation_charts(
+        passos,
+        current_step,
+        len(ordered_region),
+        animation_seconds,
+    )
+    render_search_step(
+        step,
+        current_step,
+        total_steps,
+        key,
+        ordered_region,
+        tail,
+    )
 
 
 def render_search_step(
@@ -826,13 +1111,15 @@ if result:
                     text=f"Etapa {numero_etapa} de {len(passos)}",
                 )
                 with animation_slot.container():
-                    render_search_step(
+                    render_search_presentation_frame(
                         passo,
                         numero_etapa,
                         len(passos),
                         int(result["chave"]),
                         lista.ordered_region,
                         lista.tail,
+                        passos,
+                        float(result["intervalo_animacao"]),
                     )
                 time.sleep(float(result["intervalo_animacao"]))
             st.session_state.search_animation_pending = False
@@ -877,13 +1164,15 @@ if result:
             f"{etapa_selecionada / len(passos):.0%} da apresentação",
         )
         with animation_slot.container():
-            render_search_step(
+            render_search_presentation_frame(
                 passos[etapa_selecionada - 1],
                 etapa_selecionada,
                 len(passos),
                 int(result["chave"]),
                 lista.ordered_region,
                 lista.tail,
+                passos,
+                float(result["intervalo_animacao"]),
             )
 
         linhas_do_rastro = []
