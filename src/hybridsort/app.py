@@ -337,6 +337,47 @@ st.markdown(
     .trace-message.is-right { background: #eaf2ff; color: #345b9a; }
     .trace-message.is-found { background: #e4f6ee; color: #22734b; }
 
+    .transition-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.6rem;
+        margin-top: 0.85rem;
+    }
+
+    .transition-cell {
+        min-width: 0;
+        padding: 0.7rem 0.8rem;
+        border: 1px solid #e8e6f1;
+        border-radius: 12px;
+        background: #fff;
+    }
+
+    .transition-cell span {
+        display: block;
+        color: #77738b;
+        font-size: 0.68rem;
+        font-weight: 750;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .transition-cell strong {
+        display: block;
+        margin-top: 0.25rem;
+        color: #302852;
+        font-size: 0.92rem;
+        overflow-wrap: anywhere;
+    }
+
+    .transition-arrow { color: #6758e8; font-size: 1.3rem; font-weight: 800; }
+
+    .presentation-intro {
+        margin: 0.5rem 0 0.85rem;
+        color: #68647b;
+        line-height: 1.55;
+    }
+
     .tail-track {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
@@ -423,6 +464,8 @@ st.markdown(
         .hero { padding: 1.5rem; border-radius: 18px; }
         [data-testid="stForm"] { padding: 1rem; }
         .trace-stats { grid-template-columns: 1fr; }
+        .transition-grid { grid-template-columns: 1fr; }
+        .transition-arrow { justify-self: center; transform: rotate(90deg); }
     }
     </style>
     """,
@@ -457,17 +500,38 @@ def render_search_step(
                 f"{examined_value} é igual à chave procurada. "
                 f"Encontramos o valor no índice {middle}."
             )
+            next_interval = f"Encontrado · índice {middle}"
         elif decision == "menor":
             message_class = "is-right"
+            removidos = middle - start + 1
             explanation = (
-                f"{examined_value} é menor que {key}. "
-                "Como a região está ordenada, descartamos o meio e tudo que está à esquerda."
+                f"{examined_value} < {key}: descartamos os índices {start}–{middle} "
+                f"({removidos} valores). O próximo intervalo começa em {int(step['novo_inicio'])}."
+            )
+            next_candidates = max(
+                0, int(step["novo_fim"]) - int(step["novo_inicio"]) + 1
+            )
+            next_interval = (
+                f"[{int(step['novo_inicio'])}, {int(step['novo_fim'])}] · "
+                f"{next_candidates} candidatos"
+                if next_candidates
+                else "Nenhum candidato · busca encerrada"
             )
         else:
             message_class = "is-left"
+            removidos = end - middle + 1
             explanation = (
-                f"{examined_value} é maior que {key}. "
-                "Como a região está ordenada, descartamos o meio e tudo que está à direita."
+                f"{examined_value} > {key}: descartamos os índices {middle}–{end} "
+                f"({removidos} valores). O próximo intervalo termina em {int(step['novo_fim'])}."
+            )
+            next_candidates = max(
+                0, int(step["novo_fim"]) - int(step["novo_inicio"]) + 1
+            )
+            next_interval = (
+                f"[{int(step['novo_inicio'])}, {int(step['novo_fim'])}] · "
+                f"{next_candidates} candidatos"
+                if next_candidates
+                else "Nenhum candidato · busca encerrada"
             )
 
         st.markdown(
@@ -498,6 +562,11 @@ def render_search_step(
                     <span><i class="legend-swatch gray"></i>Parte já descartada</span>
                 </div>
                 <div class="trace-message {message_class}">{explanation}</div>
+                <div class="transition-grid">
+                    <div class="transition-cell"><span>Intervalo antes</span><strong>[{start}, {end}] · {candidates} candidatos</strong></div>
+                    <span class="transition-arrow">→</span>
+                    <div class="transition-cell"><span>Próximo passo</span><strong>{next_interval}</strong></div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -529,12 +598,20 @@ def render_search_step(
             f"A chave {key} foi encontrada no item {tail_index + 1} da cauda "
             f"(índice global {len(ordered_region) + tail_index})."
         )
+        next_item = f"Encontrado · índice global {len(ordered_region) + tail_index}"
     else:
         message_class = "is-right"
         explanation = (
             f"{examined_value} não é {key}. A cauda não está ordenada, "
             "então verificamos o próximo item, um por vez."
         )
+        if tail_index + 1 < len(tail):
+            next_item = (
+                f"Item {tail_index + 2} · valor {tail[tail_index + 1]} · "
+                f"índice global {len(ordered_region) + tail_index + 1}"
+            )
+        else:
+            next_item = "Fim da cauda · chave não encontrada"
 
     st.markdown(
         f"""
@@ -557,6 +634,11 @@ def render_search_step(
                 <span><i class="legend-swatch green"></i>Chave encontrada</span>
             </div>
             <div class="trace-message {message_class}">{explanation}</div>
+            <div class="transition-grid">
+                <div class="transition-cell"><span>Comparado agora</span><strong>Item {tail_index + 1} · índice global {len(ordered_region) + tail_index}</strong></div>
+                <span class="transition-arrow">→</span>
+                <div class="transition-cell"><span>Próximo passo</span><strong>{next_item}</strong></div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -566,6 +648,8 @@ if "hybrid_list" not in st.session_state:
     st.session_state.hybrid_list = HybridList()
 if "search_result" not in st.session_state:
     st.session_state.search_result = None
+if "search_run_id" not in st.session_state:
+    st.session_state.search_run_id = 0
 if "insert_feedback" not in st.session_state:
     st.session_state.insert_feedback = None
 
@@ -657,9 +741,14 @@ with insert_column:
 
 if search_submitted:
     query = int(search_key)
+    trace = lista.search_key_with_trace(query)
+    st.session_state.search_run_id += 1
+    step_key = f"search_presentation_step_{st.session_state.search_run_id}"
+    st.session_state[step_key] = max(1, len(trace["passos"]))
     st.session_state.search_result = {
         "chave": query,
-        **lista.search_key_with_trace(query),
+        **trace,
+        "step_key": step_key,
         "animar": animate_search,
         "intervalo_animacao": animation_delay,
     }
@@ -703,21 +792,31 @@ if result:
 
     passos = result["passos"]
     if passos:
-        st.markdown("#### Caminho percorrido")
-        st.caption(
-            "A animação mostra o valor comparado em cada etapa. Na região ordenada, "
-            "a faixa roxa encolhe; na cauda, os itens são verificados em sequência."
+        st.markdown("#### Apresentação guiada do algoritmo")
+        st.markdown(
+            "<p class='presentation-intro'>Acompanhe a busca como uma apresentação: "
+            "avance ou volte pelas comparações, observe o que o algoritmo examinou "
+            "e veja exatamente o que continua sendo candidato a cada etapa.</p>",
+            unsafe_allow_html=True,
         )
 
+        step_key = result.get("step_key")
+        if not step_key:
+            st.session_state.search_run_id += 1
+            step_key = f"search_presentation_step_{st.session_state.search_run_id}"
+            st.session_state[step_key] = len(passos)
+            result["step_key"] = step_key
+
         if st.button(
-            "Reproduzir percurso",
-            key="replay_search_animation",
-            help="Executa novamente as mesmas comparações, no ritmo escolhido acima.",
+            "▶  Reproduzir apresentação",
+            key=f"replay_{step_key}",
+            help="Revê todas as comparações automaticamente no ritmo selecionado.",
         ):
             st.session_state.search_animation_pending = True
+            st.session_state[step_key] = len(passos)
 
         animation_slot = st.empty()
-        animation_progress = st.progress(0, text="Preparando o percurso da busca...")
+        animation_progress = st.progress(0, text="Apresentação pronta para começar")
         animation_requested = st.session_state.get("search_animation_pending", False)
 
         if animation_requested:
@@ -737,17 +836,55 @@ if result:
                     )
                 time.sleep(float(result["intervalo_animacao"]))
             st.session_state.search_animation_pending = False
-        else:
-            animation_progress.progress(1, text="Busca concluída")
-            with animation_slot.container():
-                render_search_step(
-                    passos[-1],
-                    len(passos),
-                    len(passos),
-                    int(result["chave"]),
-                    lista.ordered_region,
-                    lista.tail,
-                )
+
+        etapa_atual = min(
+            max(1, int(st.session_state.get(step_key, len(passos)))), len(passos)
+        )
+        anterior_col, indicador_col, proxima_col = st.columns([1, 2, 1])
+        with anterior_col:
+            voltar = st.button(
+                "←  Etapa anterior",
+                key=f"previous_{step_key}",
+                disabled=etapa_atual <= 1,
+                width="stretch",
+            )
+        with indicador_col:
+            st.caption("Você controla o ritmo: use as setas ou escolha uma etapa.")
+        with proxima_col:
+            avancar = st.button(
+                "Próxima etapa  →",
+                key=f"next_{step_key}",
+                disabled=etapa_atual >= len(passos),
+                width="stretch",
+            )
+
+        if voltar:
+            etapa_atual -= 1
+        elif avancar:
+            etapa_atual += 1
+        st.session_state[step_key] = etapa_atual
+
+        etapa_selecionada = st.slider(
+            "Etapa da apresentação",
+            min_value=1,
+            max_value=len(passos),
+            key=step_key,
+            help="Arraste para rever qualquer comparação do algoritmo.",
+        )
+        animation_progress.progress(
+            etapa_selecionada / len(passos),
+            text=f"Etapa {etapa_selecionada} de {len(passos)} · "
+            f"{etapa_selecionada / len(passos):.0%} da apresentação",
+        )
+        with animation_slot.container():
+            render_search_step(
+                passos[etapa_selecionada - 1],
+                etapa_selecionada,
+                len(passos),
+                int(result["chave"]),
+                lista.ordered_region,
+                lista.tail,
+            )
 
         linhas_do_rastro = []
         for numero_etapa, passo in enumerate(passos, start=1):
