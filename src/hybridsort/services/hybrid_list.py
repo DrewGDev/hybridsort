@@ -31,6 +31,15 @@ class HybridList:
         """
         return busca_hibrida(self.ordered_region, self.tail, key)
 
+    def search_key_with_trace(self, key: int) -> dict[str, object]:
+        """Procura uma chave e também devolve cada comparação feita.
+
+        Este método é usado pela interface para explicar visualmente o caminho
+        da busca. O método search_key continua disponível para quem precisa
+        somente do resultado e das métricas.
+        """
+        return busca_hibrida_com_rastro(self.ordered_region, self.tail, key)
+
     def insert_key(self, key: int) -> bool:
         """Insere uma chave nova na cauda e informa se a inserção foi aceita.
 
@@ -89,131 +98,130 @@ class HybridList:
 
 
 def busca_binaria(lista: list[int], chave: int) -> tuple[int, int]:
-    """Procura uma chave em uma lista ordenada usando busca binária.
+    """Procura uma chave na lista ordenada e retorna posição e iterações."""
+    indice, iteracoes, _ = _busca_binaria_com_rastro(lista, chave)
+    return indice, iteracoes
 
-    Em cada iteração, examina o elemento do meio do trecho ainda possível.
-    Como ``lista`` deve estar ordenada em ordem crescente, o valor desse
-    elemento indica qual metade pode ser descartada. Se encontrar a chave,
-    devolve seu índice e o número de iterações; se não encontrar, devolve
-    ``-1`` e o total de iterações.
 
-    Args:
-        lista: Números inteiros em ordem crescente.
-        chave: Número inteiro que será procurado.
-
-    Returns:
-        Um par ``(indice, iteracoes)``. ``indice`` é a posição da chave ou
-        ``-1`` quando ela não aparece na lista. ``iteracoes`` conta quantos
-        elementos do meio foram examinados, uma vez por passagem pelo laço.
-    """
-    # ``inicio`` e ``fim`` delimitam o trecho que ainda pode conter a chave.
+def _busca_binaria_com_rastro(
+    lista: list[int], chave: int
+) -> tuple[int, int, list[dict[str, int | str]]]:
+    """Executa a busca binária e registra os limites e a comparação de cada etapa."""
     inicio = 0
     fim = len(lista) - 1
     iteracoes = 0
+    passos: list[dict[str, int | str]] = []
 
-    # Continua enquanto houver pelo menos uma posição candidata entre os limites.
     while inicio <= fim:
-        # Uma iteração corresponde a examinar um elemento do meio.
         iteracoes += 1
+        inicio_anterior = inicio
+        fim_anterior = fim
         meio = (inicio + fim) // 2
+        valor_examinado = lista[meio]
 
-        # Se o meio contém a chave, seu índice é a resposta.
-        if lista[meio] == chave:
-            return meio, iteracoes
-
-        # Se o valor do meio é menor, a chave só pode estar à direita dele.
-        elif lista[meio] < chave:
+        if valor_examinado == chave:
+            decisao = "encontrada"
+        elif valor_examinado < chave:
+            decisao = "menor"
             inicio = meio + 1
-
-        # Caso contrário, a chave só pode estar à esquerda do meio.
         else:
+            decisao = "maior"
             fim = meio - 1
 
-    # Os limites se cruzaram: não restam posições possíveis para examinar.
-    return -1, iteracoes
+        # Cada registro permite mostrar o trecho antes e depois da comparação.
+        passos.append(
+            {
+                "fase": "binaria",
+                "inicio": inicio_anterior,
+                "fim": fim_anterior,
+                "meio": meio,
+                "valor": valor_examinado,
+                "decisao": decisao,
+                "novo_inicio": inicio,
+                "novo_fim": fim,
+            }
+        )
+
+        if decisao == "encontrada":
+            return meio, iteracoes, passos
+
+    return -1, iteracoes, passos
 
 
 def busca_sequencial(lista: list[int], chave: int) -> tuple[int, int]:
-    """Procura uma chave examinando os elementos um por um, do início ao fim.
+    """Procura uma chave item por item e retorna posição e iterações."""
+    indice, iteracoes, _ = _busca_sequencial_com_rastro(lista, chave)
+    return indice, iteracoes
 
-    Esta busca funciona mesmo quando a lista não está ordenada. Ela para assim
-    que encontra a primeira ocorrência da chave; se não encontrar, percorre a
-    lista inteira.
 
-    Args:
-        lista: Números inteiros em qualquer ordem.
-        chave: Número inteiro que será procurado.
+def _busca_sequencial_com_rastro(
+    lista: list[int], chave: int
+) -> tuple[int, int, list[dict[str, int | str]]]:
+    """Percorre a lista em ordem e registra cada valor examinado."""
+    passos: list[dict[str, int | str]] = []
 
-    Returns:
-        Um par ``(indice, iteracoes)``. ``indice`` é a posição da chave ou
-        ``-1`` quando ela não aparece. ``iteracoes`` conta quantos elementos
-        foram examinados.
-    """
-    iteracoes = 0
-
-    # ``enumerate`` fornece, a cada passo, tanto a posição quanto o valor.
     for indice, numero in enumerate(lista):
-        # Cada elemento examinado conta como uma iteração.
-        iteracoes += 1
+        decisao = "encontrada" if numero == chave else "diferente"
+        passos.append(
+            {
+                "fase": "sequencial",
+                "indice": indice,
+                "valor": numero,
+                "decisao": decisao,
+            }
+        )
 
-        # Ao achar a chave, devolve a posição local e encerra a busca.
-        if numero == chave:
-            return indice, iteracoes
+        if decisao == "encontrada":
+            return indice, len(passos), passos
 
-    # O laço terminou sem encontrar a chave.
-    return -1, iteracoes
+    return -1, len(passos), passos
 
 
 def busca_hibrida(
     regiao_ordenada: list[int], cauda: list[int], chave: int
 ) -> dict[str, bool | str | int]:
-    """Procura uma chave nas duas partes de uma lista híbrida.
+    """Procura a chave nas duas partes e devolve somente o resumo da busca."""
+    resultado, _ = _busca_hibrida_com_rastro(regiao_ordenada, cauda, chave)
+    return resultado
 
-    Primeiro usa busca binária na ``regiao_ordenada``. Se a chave não estiver
-    lá, usa busca sequencial na ``cauda``, que pode não estar ordenada. O índice
-    da cauda é convertido para um índice global, considerando a lista lógica
-    ``regiao_ordenada + cauda``.
 
-    Args:
-        regiao_ordenada: Parte inicial da lista, ordenada em ordem crescente.
-        cauda: Parte final da lista, mantida sem ordenação.
-        chave: Número inteiro que será procurado.
+def busca_hibrida_com_rastro(
+    regiao_ordenada: list[int], cauda: list[int], chave: int
+) -> dict[str, object]:
+    """Devolve o resumo da busca híbrida junto com todas as etapas examinadas."""
+    resultado, passos = _busca_hibrida_com_rastro(
+        regiao_ordenada, cauda, chave
+    )
+    return {**resultado, "passos": passos}
 
-    Returns:
-        Um dicionário com:
-        - ``encontrado``: ``True`` se a chave estiver em uma das partes.
-        - ``regiao``: ``"Região ordenada"``, ``"Cauda"`` ou ``"Não encontrado"``.
-        - ``indice_global``: posição na lista lógica completa ou ``-1``.
-        - ``iteracoes_binarias`` e ``iteracoes_sequenciais``: trabalho feito
-          por cada busca.
-        - ``total_iteracoes``: soma das iterações das duas buscas.
-    """
-    # Pesquisa primeiro a parte ordenada, descartando metade dos candidatos por iteração.
-    posicao_binaria, iteracoes_binarias = busca_binaria(regiao_ordenada, chave)
 
-    # A busca sequencial só será executada se a chave não estiver na região ordenada.
-    posicao_sequencial = -1
+def _busca_hibrida_com_rastro(
+    regiao_ordenada: list[int], cauda: list[int], chave: int
+) -> tuple[dict[str, bool | str | int], list[dict[str, int | str]]]:
+    """Combina as duas estratégias e preserva a ordem real das comparações."""
+    posicao_binaria, iteracoes_binarias, passos_binarios = (
+        _busca_binaria_com_rastro(regiao_ordenada, chave)
+    )
+    passos = list(passos_binarios)
     iteracoes_sequenciais = 0
 
     if posicao_binaria != -1:
-        # O índice local da região ordenada já é o índice global da lista lógica.
         regiao = "Região ordenada"
         indice_global = posicao_binaria
     else:
-        # Como a cauda pode estar fora de ordem, examinamos seus elementos em sequência.
-        posicao_sequencial, iteracoes_sequenciais = busca_sequencial(cauda, chave)
+        posicao_sequencial, iteracoes_sequenciais, passos_sequenciais = (
+            _busca_sequencial_com_rastro(cauda, chave)
+        )
+        passos.extend(passos_sequenciais)
 
         if posicao_sequencial != -1:
-            # A cauda vem depois da região ordenada; somamos seu tamanho ao índice local.
             regiao = "Cauda"
             indice_global = len(regiao_ordenada) + posicao_sequencial
         else:
-            # A chave não apareceu em nenhuma das partes.
             regiao = "Não encontrado"
             indice_global = -1
 
-    # Retorna um resumo consistente, inclusive quantas iterações cada estratégia usou.
-    return {
+    resultado = {
         "encontrado": indice_global != -1,
         "regiao": regiao,
         "indice_global": indice_global,
@@ -221,3 +229,4 @@ def busca_hibrida(
         "iteracoes_sequenciais": iteracoes_sequenciais,
         "total_iteracoes": iteracoes_binarias + iteracoes_sequenciais,
     }
+    return resultado, passos
