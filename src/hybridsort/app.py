@@ -687,6 +687,11 @@ if st.session_state.insert_feedback:
     getattr(st, feedback_type)(feedback_message)
 
 result = st.session_state.search_result
+# Limpa resultados de sessões que foram criados antes do recurso de rastreamento.
+if result and "passos" not in result:
+    st.session_state.search_result = None
+    result = None
+
 if result:
     st.subheader("Resultado da busca")
     if result["encontrado"]:
